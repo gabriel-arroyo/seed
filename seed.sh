@@ -14,8 +14,8 @@ while getopts ":a:r:b:p:h" o; do case "${o}" in
 	*) printf "Invalid option: -%s\\n" "$OPTARG" && exit ;;
 esac done
 
-[ -z "$dotfilesrepo" ] && dotfilesrepo="https://github.com/gabriel-arroyo/seed.git"
-[ -z "$progsfile" ] && progsfile="https://raw.githubusercontent.com/LukeSmithxyz/LARBS/master/progs.csv"
+[ -z "$dotfilesrepo" ] && dotfilesrepo="https://github.com/gabriel-arroyo/voidrice.git"
+[ -z "$progsfile" ] && progsfile="https://raw.githubusercontent.com/gabriel-arroyo/seed/master/progs.csv"
 [ -z "$aurhelper" ] && aurhelper="yay"
 [ -z "$repobranch" ] && repobranch="master"
 
@@ -60,13 +60,97 @@ adduserandpass() { \
 	dialog --infobox "Adding user \"$name\"..." 4 50
 	useradd -m -g wheel -s /bin/bash "$name" >/dev/null 2>&1 ||
 	usermod -a -G wheel "$name" && mkdir -p /home/"$name" && chown "$name":wheel /home/"$name"
+	# Add autologin
+	groupadd -r autologin
+	usermod -a -G rfkill "$name"
+	gpasswd -a "$name" autologin
+
+	sed -i 's/'#autologin-user='/'autologin-user=$choice'/g' /etc/lightdm/lightdm.conf
+	sed -i 's/'#autologin-session='/'autologin-session=bspwm'/g' /etc/lightdm/lightdm.conf
+
 	echo "$name:$pass1" | chpasswd
 	unset pass1 pass2 ;}
 
 refreshkeys() { \
+	# from archway
+	[ -d $HOME"/.gnupg" ] || mkdir -p $HOME"/.gnupg"
+
+	echo "Adding keyservers to your personal .gpg for future applications"
+	echo "that require keys to be imported with yay for example"
+
+	echo '
+	keyserver hkp://pool.sks-keyservers.net:80
+	keyserver hkps://hkps.pool.sks-keyservers.net:443
+	keyserver hkp://ipv4.pool.sks-keyservers.net:11371' | tee --append ~/.gnupg/gpg.conf
+
+	chmod 600 ~/.gnupg/gpg.conf
+	chmod 700 ~/.gnupg
+
+	echo "Adding keyservers to the /etc/pacman.d/gnupg folder for the use with pacman"
+
+	echo '
+	keyserver hkp://pool.sks-keyservers.net:80
+	keyserver hkps://hkps.pool.sks-keyservers.net:443
+	keyserver hkp://ipv4.pool.sks-keyservers.net:11371' | sudo tee --append /etc/pacman.d/gnupg/gpg.conf
+
+	echo "Receiving, local signing and refreshing keys"
+
+	sudo pacman-key -r 74F5DE85A506BF64
+	sudo pacman-key --lsign-key 74F5DE85A506BF64
+	sudo pacman-key --refresh-keys
+
+
+	# original
 	dialog --infobox "Refreshing Arch Keyring..." 4 40
 	pacman --noconfirm -Sy archlinux-keyring >/dev/null 2>&1
 	}
+
+addrepos(){
+	echo "Getting the latest arcolinux mirrors file"
+
+	sudo pacman -S wget --noconfirm --needed
+	sudo wget https://raw.githubusercontent.com/arcolinux/arcolinux-mirrorlist/master/etc/pacman.d/arcolinux-mirrorlist -O /etc/pacman.d/arcolinux-mirrorlist
+
+
+	echo '
+	#[arcolinux_repo_testing]
+	#SigLevel = Required DatabaseOptional
+	#Include = /etc/pacman.d/arcolinux-mirrorlist
+
+	[arcolinux_repo]
+	SigLevel = Required DatabaseOptional
+	Include = /etc/pacman.d/arcolinux-mirrorlist
+
+	[arcolinux_repo_3party]
+	SigLevel = Required DatabaseOptional
+	Include = /etc/pacman.d/arcolinux-mirrorlist
+
+	[arcolinux_repo_submicron]
+	SigLevel = Required DatabaseOptional
+	Include = /etc/pacman.d/arcolinux-mirrorlist' | sudo tee --append /etc/pacman.conf
+
+	sudo pacman -Syy
+
+	echo "Installing the official mirrorlist file now."
+	echo "It will overwrite the one we downloaded earlier on."
+
+	sudo pacman -S arcolinux-mirrorlist-git --noconfirm
+}
+
+useallcores(){
+	numberofcores=$(grep -c ^processor /proc/cpuinfo)
+
+	if [ $numberofcores -gt 1 ]
+	then
+	        echo "You have " $numberofcores" cores."
+	        echo "Changing the makeflags for "$numberofcores" cores."
+	        sudo sed -i 's/#MAKEFLAGS="-j2"/MAKEFLAGS="-j'$(($numberofcores+1))'"/g' /etc/makepkg.conf;
+	        echo "Changing the compression settings for "$numberofcores" cores."
+	        sudo sed -i 's/COMPRESSXZ=(xz -c -z -)/COMPRESSXZ=(xz -c -T '"$numberofcores"' -z -)/g' /etc/makepkg.conf
+	else
+        echo "No change."
+	fi
+}
 
 newperms() { # Set special sudoers settings for install (or after).
 	sed -i "/#GABOS/d" /etc/sudoers
@@ -89,7 +173,8 @@ maininstall() { # Installs all needed programs from main repo.
 	}
 
 gitmakeinstall() {
-	dir=$(mktemp -d)
+	#dir=$(mktemp -d)
+	dir="/home/\"$name\"/repos"
 	dialog --title "GABOS Installation" --infobox "Installing \`$(basename "$1")\` ($n of $total) via \`git\` and \`make\`. $(basename "$1") $2" 5 70
 	git clone --depth 1 "$1" "$dir" >/dev/null 2>&1
 	cd "$dir" || exit
@@ -138,8 +223,34 @@ systembeepoff() { dialog --infobox "Getting rid of that retarded error beep soun
 	rmmod pcspkr
 	echo "blacklist pcspkr" > /etc/modprobe.d/nobeep.conf ;}
 
+installfonts(){
+	[ -d $HOME"/.fonts" ] || mkdir -p $HOME"/.fonts"
+
+	echo "Copy fonts to .fonts"
+
+	cp Personal/settings/fonts/* ~/.fonts/
+
+	echo "Building new fonts into the cache files";
+	echo "Depending on the number of fonts, this may take a while..."
+	fc-cache -fv ~/.fonts
+}
+
 finalize(){ \
 	dialog --infobox "Preparing welcome message..." 4 50
+	systemctl enable lightdm.service -f
+	systemctl set-default graphical.target
+	systemctl enable bluetooth.service
+	systemctl start bluetooth.service
+	systemctl enable org.cups.cupsd.service
+	systemctl enable avahi-daemon.service
+	systemctl start avahi-daemon.service
+	installfonts
+	# Network discovery
+	sudo sed -i 's/files mymachines myhostname/files mymachines/g' /etc/nsswitch.conf
+	sudo sed -i 's/\[\!UNAVAIL=return\] dns/\[\!UNAVAIL=return\] mdns dns wins myhostname/g' /etc/nsswitch.conf
+	systemctl enable tlp.service
+	systemctl start tlp.service
+	sudo sed -i 's/'#AutoEnable=false'/'AutoEnable=true'/g' /etc/bluetooth/main.conf
 	#echo "exec_always --no-startup-id notify-send -i ~/.local/share/GABOS/GABOS.png 'Welcome to GABOS:' 'Press Super+F1 for the manual.' -t 10000"  >> "/home/$name/.config/i3/config"
 	dialog --title "All done!" --msgbox "Congrats! Provided there were no hidden errors, the script completed successfully and all the programs and configuration files should be in place.\\n\\nTo run the new graphical environment, log out and log back in as your new user, then run the command \"startx\" to start the graphical environment (it will start automatically in tty1).\\n\\n.t Gabo" 12 80
 	}
@@ -187,8 +298,38 @@ sed -i "s/-j2/-j$(nproc)/;s/^#MAKEFLAGS/MAKEFLAGS/" /etc/makepkg.conf
 
 manualinstall $aurhelper || error "Failed to install AUR helper."
 
+# from archway
+addrepos
+useallcores
+
 # The command that does all the installing. Reads the progs.csv file and
 # installs each needed program the way required. Be sure to run this only after
 # the user has been created and has priviledges to run sudo without a password
 # and all build dependencies are installed.
+mkdir /home/"$name"/repos
 installationloop
+
+# Install the dotfiles in the user's home directory
+putgitrepo "$dotfilesrepo" "/home/$name" "$repobranch"
+rm -f "/home/$name/README.md" "/home/$name/LICENSE"
+
+# Most important command! Get rid of the beep!
+systembeepoff
+
+# This line, overwriting the `newperms` command above will allow the user to run
+# serveral important commands, `shutdown`, `reboot`, updating, etc. without a password.
+newperms "%wheel ALL=(ALL) ALL #LARBS
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/shutdown,/usr/bin/reboot,/usr/bin/systemctl suspend,/usr/bin/wifi-menu,/usr/bin/mount,/usr/bin/umount,/usr/bin/pacman -Syu,/usr/bin/pacman -Syyu,/usr/bin/packer -Syu,/usr/bin/packer -Syyu,/usr/bin/systemctl restart NetworkManager,/usr/bin/rc-service NetworkManager restart,/usr/bin/pacman -Syyu --noconfirm,/usr/bin/loadkeys,/usr/bin/yay,/usr/bin/pacman -Syyuw --noconfirm"
+
+# Make zsh the default shell for the user
+sed -i "s/^$name:\(.*\):\/bin\/.*/$name:\1:\/bin\/zsh/" /etc/passwd
+
+# dbus UUID must be generated for Artix runit
+dbus-uuidgen > /var/lib/dbus/machine-id
+
+# Let LARBS know the WM it's supposed to run.
+echo "$edition" > "/home/$name/.local/share/larbs/wm"; chown "$name:wheel" "/home/$name/.local/share/larbs/wm"
+
+# Last message! Install complete!
+finalize
+clear
