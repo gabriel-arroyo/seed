@@ -7,11 +7,11 @@ echo "[hwclock]"
 hwclock --systohc 2>/dev/null && echo "Ok" || echo "Fail"
 
 echo "[locale]"
-cp locale.gen /etc/locale.gen 2>/dev/null && echo "Ok" || echo "Fail copy"
+#cp locale.gen /etc/locale.gen 2>/dev/null && echo "Ok" || echo "Fail copy"
 locale-gen 2>/dev/null && echo "Ok" || echo "Fail localegen"
 
 echo "[LANG & KEYMAP"]
-echo LANG=es_MX.UTF-8 > /etc/locale.conf 2>/dev/null && echo "Ok" || echo "Fail"
+echo LANG=en_US.UTF-8 > /etc/locale.conf 2>/dev/null && echo "Ok" || echo "Fail"
 echo KEYMAP=es_latin1 > /etc/vconsole.conf 2>/dev/null && echo "Ok" || echo "Fail"
 echo arroyo > /etc/hostname 2>/dev/null && echo "Ok" || echo "Fail"
 echo "127.0.1.1    localhost.localdomain arroyo" >> /etc/hosts 2>/dev/null && echo "Ok" || echo "Fail"
